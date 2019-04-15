@@ -1,0 +1,119 @@
+---
+- name: Ruby
+  vars:
+    ruby_version: 2.6
+    ruby_name: ruby-2.6.2
+    ruby_url: "http://cache.ruby-lang.org/pub/ruby/{{ ruby_version }}/{{ ruby_name }}.tar.gz"
+    ruby_tmp_path: "/usr/local/src/{{ ruby_name }}"
+    jemalloc_version: "5.2.0"
+  remote_user: root
+  hosts: all
+  tasks:
+    - name: Check jemalloc package installed
+      stat:
+        path: /usr/local/bin/jemalloc-config
+      register: jemalloc_config_bin_file
+
+    - name: Install libjemalloc-dev
+      apt:
+        name: libjemalloc-dev
+        state: installed
+      when: not jemalloc_config_bin_file.stat.exists
+
+    - name: Get current jemalloc version
+      shell: /usr/local/bin/jemalloc-config --version | sed "s/^\([0-9]\+\.[0-9]\+\.[0-9]\+\).*/\1/"
+      register: jemalloc_system_version
+      when: jemalloc_config_bin_file.stat.exists
+
+    - name: Set current jemalloc version
+      set_fact:
+        current_jemalloc_version: "{{ jemalloc_system_version.stdout }}"
+      when: jemalloc_config_bin_file.stat.exists
+
+    - block:
+      - name: Download jemalloc release
+        unarchive:
+          src: "https://github.com/jemalloc/jemalloc/releases/download/{{ jemalloc_version }}/jemalloc-{{ jemalloc_version }}.tar.bz2"
+          dest: "/tmp"
+          remote_src: yes
+          mode: "u=rwx,g=rx,o="
+          creates: "/tmp/jemalloc-{{ jemalloc_version }}"
+
+      - name: Configure, make and install jemalloc
+        command: "{{ item }}"
+        # become: yes
+        args:
+          chdir: "/tmp/jemalloc-{{ jemalloc_version }}"
+        with_items:
+          - ./configure
+          - make
+          - make install
+
+      - name: Remove obsolete files
+        file:
+          path: "/tmp/jemalloc-{{ jemalloc_version }}"
+          state: absent
+      when: (not jemalloc_config_bin_file.stat.exists) or
+            (current_jemalloc_version is version(jemalloc_version, '!='))
+
+
+    - name: Check ruby installed
+      shell: ruby -v | grep -o "ruby {{ ruby_version }}"
+      register: ruby_installed
+      ignore_errors: yes
+
+      # For ruby version less than 2.6 'LIBS', for 2.6 'MAINLIBS'
+    - name: Check ruby configured with jemalloc
+      shell: ((ruby -r rbconfig -e "puts RbConfig::CONFIG['MAINLIBS']");
+              (ruby -r rbconfig -e "puts RbConfig::CONFIG['LIBS']")) | grep -o jemalloc
+      register: ruby_with_jemalloc
+      ignore_errors: yes
+      when: ruby_installed is succeeded
+
+    - block:
+      - name: Download
+        get_url:
+          url: "{{ ruby_url }}"
+          dest: "{{ ruby_tmp_path }}.tar"
+
+      - name: Extract
+        unarchive:
+          src: "{{ ruby_tmp_path }}.tar"
+          dest: '/usr/local/src/'
+          remote_src: yes
+          creates: "{{ ruby_tmp_path }}"
+
+      - name: Remove prev bin file
+        file:
+          path: '/usr/local/bin/ruby'
+          state: absent
+
+      - name: Make, configure, and install ruby.
+        command: "{{ item }}"
+        become: yes
+        args:
+          chdir: "{{ ruby_tmp_path }}"
+          creates: '/usr/local/bin/ruby'
+        with_items:
+          - ./configure --with-jemalloc
+          - make
+          - make install
+
+      - name: Remove tarball
+        file:
+          path: "{{ ruby_tmp_path }}.tar"
+          state: absent
+
+      - name: Remove temp dir
+        file:
+          path: "{{ ruby_tmp_path }}"
+          state: absent
+
+      - name: Update alternatives
+        alternatives:
+          name: 'ruby'
+          link: '/usr/bin/ruby'
+          path: '/usr/local/bin/ruby'
+      when: (ruby_installed is failed) or
+            (ruby_with_jemalloc is failed)
+

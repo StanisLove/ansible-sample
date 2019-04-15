@@ -1,0 +1,5 @@
+#!/bin/bash
+
+# ansible command with user and inventories
+
+ansible -u root -i inventories/hosts "$@"

@@ -1,0 +1,74 @@
+---
+- name: Bootstrap server for future ansible runs
+  hosts: all
+  # become: yes
+  remote_user: root
+  gather_facts: no
+  tasks:
+    - name: "Apt-get update"
+      raw: apt-get update
+
+    - name: "Check aptitude installed"
+      raw: aptitude -h 2>&1 >/dev/null | grep -o -e "not found" -e "not installed"
+      register: aptitude_not_installed
+      ignore_errors: yes
+
+    - name: "Install aptitude"
+      raw: apt-get install aptitude -y
+      when: aptitude_not_installed is succeeded
+
+    - name: "Check python installed"
+      raw: python --version 2>&1 >/dev/null | grep -o -e "not found" -e "not installed"
+      register: python_not_installed
+      ignore_errors: yes
+
+    - name: "Install python"
+      raw: apt-get install python -y
+      when: python_not_installed is succeeded
+
+    - block:
+      - name: "grub-pc dirty hack | remove grub-pc"
+        apt:
+          name: grub-pc
+          purge: yes
+          state: absent
+      - name: "grub-pc dirty hack | apt clean"
+        apt:
+          autoclean: yes
+      - name: "grub-pc dirty hack | install grub-pc"
+        apt:
+          name: grub-pc
+          state: latest
+
+    - name: "Upgrade packages"
+      apt:
+        update_cache: yes
+        upgrade: yes
+
+    - name: "Install dependencies"
+      apt:
+        name: "{{ item }}"
+        state: present
+      with_items:
+        - build-essential
+        - automake
+        - bison
+        - autoconf
+        - pkg-config
+        - libreadline6
+        - libreadline6-dev
+        - openssl
+        - libssl-dev
+        - libncurses5-dev
+        - curl
+        - git
+        - zlib1g
+        - zlib1g-dev
+        - libyaml-dev
+        - libsqlite3-dev
+        - libxml2-dev
+        - libxslt1-dev
+        - nfs-common
+        - ntp
+        - vim
+        - htop
